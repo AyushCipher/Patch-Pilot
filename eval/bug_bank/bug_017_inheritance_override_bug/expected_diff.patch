@@ -1,0 +1,8 @@
+--- a/shapes.py
++++ b/shapes.py
+@@ -25,4 +25,4 @@
+         self.height = height
+ 
+     def area(self) -> float:
+-        return self.base * self.height
++        return self.base * self.height / 2

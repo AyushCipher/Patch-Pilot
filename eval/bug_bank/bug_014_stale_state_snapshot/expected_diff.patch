@@ -1,0 +1,12 @@
+--- a/fulfillment.py
++++ b/fulfillment.py
+@@ -2,7 +2,7 @@
+     """Checks whether an order can currently be fulfilled from stock."""
+ 
+     def __init__(self, ledger):
+-        self.stock_snapshot = dict(ledger.stock)
++        self.ledger = ledger
+ 
+     def can_fulfill(self, sku: str, qty: int) -> bool:
+-        return self.stock_snapshot.get(sku, 0) >= qty
++        return self.ledger.available(sku) >= qty

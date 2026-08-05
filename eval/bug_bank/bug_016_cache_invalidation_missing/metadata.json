@@ -1,0 +1,5 @@
+{
+  "difficulty": "hard",
+  "bug_type": "multi-file",
+  "description": "PriceAdmin.update_price updates ProductStore but never calls PriceCache.invalidate(sku), so previously-cached display prices go stale. PriceCache already implements invalidate() correctly - the bug is a missing call at the integration point in admin.py, only discoverable by reading all three files together."
+}

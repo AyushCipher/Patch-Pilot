@@ -1,0 +1,7 @@
+--- a/admin.py
++++ b/admin.py
+@@ -7,3 +7,4 @@
+         """Update a product's base price. Callers must see the new display
+         price immediately after this returns."""
+         self.store.set_price(sku, new_price)
++        self.cache.invalidate(sku)

@@ -1,0 +1,11 @@
+--- a/memory_cache.py
++++ b/memory_cache.py
+@@ -6,7 +6,7 @@
+         self._data = {}
+ 
+     def get(self, key):
+-        return self._data[key]
++        return self._data.get(key)
+ 
+     def set(self, key, value):
+         self._data[key] = value

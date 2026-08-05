@@ -1,0 +1,5 @@
+{
+  "difficulty": "hard",
+  "bug_type": "multi-file",
+  "description": "FulfillmentService takes a one-time dict(ledger.stock) snapshot in __init__ instead of holding a reference to the live InventoryLedger, so it never observes stock changes made later by ReservationService. Diagnosing this requires reading all three files: ledger.py (the shared source of truth), reservations.py (which correctly mutates it), and fulfillment.py (which silently copies it instead of referencing it)."
+}

@@ -1,0 +1,5 @@
+{
+  "difficulty": "hard",
+  "bug_type": "multi-file",
+  "description": "NotificationService.resubscribe() calls bus.subscribe() again without first calling bus.unsubscribe(), so the same handler is registered twice on the EventBus and fires twice per published event. Understanding the fix requires reading event_bus.py's subscribe/unsubscribe semantics alongside notifications.py's usage pattern."
+}

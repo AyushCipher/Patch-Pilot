@@ -1,0 +1,5 @@
+{
+  "difficulty": "hard",
+  "bug_type": "multi-file",
+  "description": "MemoryCache.get() raises KeyError on a miss (self._data[key]) instead of returning None, violating the documented Cache contract in cache_interface.py. PricingService relies on that contract and never catches the exception, so the very first cache miss crashes instead of triggering a compute-and-cache path. Requires reading the interface docstring, the concrete implementation, and the consumer to see where the contract is broken."
+}

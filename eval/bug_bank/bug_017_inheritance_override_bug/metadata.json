@@ -1,0 +1,5 @@
+{
+  "difficulty": "hard",
+  "bug_type": "logic",
+  "description": "Triangle.area() overrides Shape.area() as `base * height` instead of `base * height / 2`, breaking the base class's documented geometric-area invariant. The bug is invisible when reading report.py alone (it looks like correct polymorphic aggregation) - it only surfaces by reading shapes.py and checking each override against the base contract."
+}

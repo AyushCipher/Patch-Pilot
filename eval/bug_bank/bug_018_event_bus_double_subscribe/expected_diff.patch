@@ -1,0 +1,8 @@
+--- a/notifications.py
++++ b/notifications.py
+@@ -15,4 +15,5 @@
+         self.sent.append(payload)
+ 
+     def resubscribe(self) -> None:
++        self.bus.unsubscribe("order_placed", self._on_order)
+         self.bus.subscribe("order_placed", self._on_order)
