@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - PATCHPILOT_MODEL=${PATCHPILOT_MODEL:-claude-sonnet-4-5-20250929}
+      - MAX_ITERATIONS=${MAX_ITERATIONS:-6}
+      - TEST_TIMEOUT_SECONDS=${TEST_TIMEOUT_SECONDS:-30}
+      - RUNS_DIR=runs
+    volumes:
+      - ./runs:/app/runs
+      - ./eval/results:/app/eval/results
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
