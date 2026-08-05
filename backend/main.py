@@ -107,6 +107,18 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/bugs")
+async def list_bugs() -> list[dict]:
+    bugs = []
+    for bug_dir in sorted(BUG_BANK_DIR.iterdir()):
+        metadata_path = bug_dir / "metadata.json"
+        if not metadata_path.exists():
+            continue
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        bugs.append({"bug_id": bug_dir.name, **metadata})
+    return bugs
+
+
 @app.post("/api/runs", response_model=RunSummary)
 async def create_run(
     bug_id: Optional[str] = Form(None),
