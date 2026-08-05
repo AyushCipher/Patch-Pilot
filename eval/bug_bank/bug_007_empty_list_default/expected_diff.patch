@@ -1,0 +1,9 @@
+--- a/stats.py
++++ b/stats.py
+@@ -1,5 +1,5 @@
+ def average(values: list) -> float:
+     """Return the arithmetic mean of values, or 0.0 for an empty list."""
+     if not values:
+-        return None
++        return 0.0
+     return sum(values) / len(values)

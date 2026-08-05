@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "logic",
+  "description": "average([]) returns None instead of the documented 0.0 default for an empty list."
+}

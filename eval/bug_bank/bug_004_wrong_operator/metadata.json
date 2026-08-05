@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "logic",
+  "description": "total_value uses `unit_price + quantity` instead of `unit_price * quantity`."
+}

@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "off-by-one",
+  "description": "last_n_chars slices with s[-n + 1:] instead of s[-n:], dropping one extra character from the front of the result."
+}

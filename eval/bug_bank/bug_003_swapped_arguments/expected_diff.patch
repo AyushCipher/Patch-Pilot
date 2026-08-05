@@ -1,0 +1,8 @@
+--- a/pricing.py
++++ b/pricing.py
+@@ -5,4 +5,4 @@
+ 
+ def final_price(discount_pct: float, price: float) -> float:
+     """Compute the final price given a discount percentage and a base price."""
+-    return apply_discount(discount_pct, price)
++    return apply_discount(price, discount_pct)

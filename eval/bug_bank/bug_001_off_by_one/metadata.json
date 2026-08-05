@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "off-by-one",
+  "description": "sum_first_n(n) uses range(1, n) instead of range(1, n+1), excluding n from the sum."
+}

@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "logic",
+  "description": "can_access uses `is_active or is_verified` instead of `is_active and is_verified`."
+}

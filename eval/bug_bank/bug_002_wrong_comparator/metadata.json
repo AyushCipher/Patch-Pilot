@@ -1,0 +1,5 @@
+{
+  "difficulty": "easy",
+  "bug_type": "logic",
+  "description": "is_passing(score) uses `score > 60` instead of `score >= 60`, so a score of exactly 60 is incorrectly marked as failing."
+}
