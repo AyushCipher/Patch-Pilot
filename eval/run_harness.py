@@ -5,7 +5,7 @@ per-bug results and an honest per-difficulty-tier breakdown.
 Usage:
     python eval/run_harness.py [--bug-bank eval/bug_bank] [--out eval/results/harness_report.json]
 
-Requires ANTHROPIC_API_KEY to be set (the agent makes real Messages API
+Requires GROQ_API_KEY to be set (the agent makes real chat-completions API
 calls). Each bug gets its own run_id under runs/eval_<bug_id>/.
 """
 

@@ -6,8 +6,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - PATCHPILOT_MODEL=${PATCHPILOT_MODEL:-claude-sonnet-4-5-20250929}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - PATCHPILOT_MODEL=${PATCHPILOT_MODEL:-openai/gpt-oss-120b}
       - MAX_ITERATIONS=${MAX_ITERATIONS:-6}
       - TEST_TIMEOUT_SECONDS=${TEST_TIMEOUT_SECONDS:-30}
       - RUNS_DIR=runs

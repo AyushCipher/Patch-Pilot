@@ -1,8 +1,9 @@
-"""Tool implementations exposed to the LLM via Anthropic tool-use.
+"""Tool implementations exposed to the LLM via tool use.
 
 Each function takes the active Sandbox plus the tool's input dict and
-returns a JSON-serializable result. `TOOL_SCHEMAS` is the Anthropic
-`tools=[...]` schema list passed to the Messages API.
+returns a JSON-serializable result. `TOOL_SCHEMAS` is a provider-agnostic
+schema list (name, description, input_schema); agent/llm_client.py
+converts it into the wire format the active LLM provider expects.
 """
 
 from __future__ import annotations

@@ -29,19 +29,19 @@ def test_list_bugs_returns_full_bug_bank() -> None:
 
 
 def test_create_run_requires_bug_id_or_zip(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "sk-test-key")
     response = client.post("/api/runs")
     assert response.status_code == 400
 
 
 def test_create_run_without_api_key_returns_503(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
     response = client.post("/api/runs", data={"bug_id": "bug_001_off_by_one"})
     assert response.status_code == 503
 
 
 def test_create_run_unknown_bug_id_returns_404(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    monkeypatch.setenv("GROQ_API_KEY", "sk-test-key")
     response = client.post("/api/runs", data={"bug_id": "bug_does_not_exist"})
     assert response.status_code == 404
 

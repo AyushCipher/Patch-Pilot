@@ -11,7 +11,7 @@ from agent.llm_client import LLMResponse
 
 class FakeLLMClient:
     """Stands in for LLMClient in tests - returns a pre-scripted sequence of
-    responses instead of calling the real Anthropic API."""
+    responses instead of calling the real Groq API."""
 
     def __init__(self, responses: list[LLMResponse]) -> None:
         self._responses = list(responses)

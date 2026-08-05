@@ -125,8 +125,8 @@ async def create_run(
     repo_zip: Optional[UploadFile] = File(None),
     max_iterations: int = Form(MAX_ITERATIONS),
 ) -> RunSummary:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured on the server")
+    if not os.environ.get("GROQ_API_KEY"):
+        raise HTTPException(status_code=503, detail="GROQ_API_KEY is not configured on the server")
 
     run_id = uuid.uuid4().hex[:12]
 
