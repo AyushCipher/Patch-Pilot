@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "logic",
+  "description": "records.sort_key ignores 'priority' entirely and sorts by 'name' only. The bug is only obvious once you cross-reference the docstring contract in records.py against how scheduler.py consumes it."
+}

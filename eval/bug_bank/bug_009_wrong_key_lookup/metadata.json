@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "type-error",
+  "description": "reports.active_emails looks up d[\"is_active\"] but User.to_dict() (in models.py) actually names that key \"active\", causing a KeyError. Requires reading models.py to discover the correct key name."
+}

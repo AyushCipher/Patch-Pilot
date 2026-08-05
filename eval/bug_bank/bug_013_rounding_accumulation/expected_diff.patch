@@ -1,0 +1,9 @@
+--- a/checkout.py
++++ b/checkout.py
+@@ -6,5 +6,5 @@
+     does not accumulate across many items."""
+     total = 0.0
+     for price in item_prices:
+-        total += round_currency(price)
++        total += price
+     return round_currency(total)

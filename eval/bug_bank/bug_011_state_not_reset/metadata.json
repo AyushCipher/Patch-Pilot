@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "multi-file",
+  "description": "RunningTotal.reset() in counter.py is a no-op, so billing.compute_invoice_totals's per-batch totals leak across batches. The call site (billing.py) looks correct in isolation; the root cause is only visible by also reading counter.py."
+}

@@ -1,0 +1,8 @@
+--- a/retry.py
++++ b/retry.py
+@@ -7,4 +7,4 @@
+     attempt_number is 1-indexed (the attempt that just failed). Retries are
+     allowed as long as attempt_number is below MAX_RETRY_ATTEMPTS.
+     """
+-    return attempt_number < MAX_RETRY_ATTEMPTS - 1
++    return attempt_number < MAX_RETRY_ATTEMPTS

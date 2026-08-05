@@ -1,0 +1,8 @@
+--- a/counter.py
++++ b/counter.py
+@@ -7,4 +7,4 @@
+         return self.total
+ 
+     def reset(self):
+-        pass
++        self.total = 0

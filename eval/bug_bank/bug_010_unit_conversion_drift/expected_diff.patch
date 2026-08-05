@@ -1,0 +1,9 @@
+--- a/weather.py
++++ b/weather.py
+@@ -3,5 +3,5 @@
+ 
+ def format_report(celsius_temp: float) -> str:
+     """Return a human-readable report showing the Fahrenheit equivalent."""
+-    fahrenheit = celsius_temp * 9 / 5
++    fahrenheit = celsius_to_fahrenheit(celsius_temp)
+     return f"{fahrenheit:.1f}F"

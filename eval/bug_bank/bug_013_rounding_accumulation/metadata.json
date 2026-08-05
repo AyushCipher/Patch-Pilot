@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "logic",
+  "description": "checkout.compute_total rounds each item price via currency_utils.round_currency before summing, instead of summing raw floats and rounding once at the end. The docstring already states the intended contract; the bug is that the implementation contradicts it."
+}

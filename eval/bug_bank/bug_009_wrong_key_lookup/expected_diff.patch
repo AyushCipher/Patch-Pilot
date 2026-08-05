@@ -1,0 +1,10 @@
+--- a/reports.py
++++ b/reports.py
+@@ -3,6 +3,6 @@
+     result = []
+     for u in users:
+         d = u.to_dict()
+-        if d["is_active"]:
++        if d["active"]:
+             result.append(d["email"])
+     return result

@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "multi-file",
+  "description": "weather.format_report duplicates the Celsius-to-Fahrenheit formula instead of calling convert.celsius_to_fahrenheit, and drops the '+ 32' offset. Requires reading convert.py to see the correct formula and either fix the duplicated logic or call the shared function."
+}

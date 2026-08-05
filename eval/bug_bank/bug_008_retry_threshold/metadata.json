@@ -1,0 +1,5 @@
+{
+  "difficulty": "medium",
+  "bug_type": "logic",
+  "description": "should_retry() in retry.py uses `attempt_number < MAX_RETRY_ATTEMPTS - 1`, an extra off-by-one against the MAX_RETRY_ATTEMPTS constant defined in config.py. Requires reading both files to see the threshold is used incorrectly downstream."
+}
