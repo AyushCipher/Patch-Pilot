@@ -44,6 +44,30 @@ def tool_use_response(tool_name: str, tool_input: dict, tool_id: str = "tool_1")
     )
 
 
+class FlakyLLMClient:
+    """Raises for the first `fail_times` calls, then returns scripted responses."""
+
+    def __init__(self, fail_times: int, responses: list[LLMResponse]) -> None:
+        self.fail_times = fail_times
+        self._responses = list(responses)
+        self.calls = 0
+
+    def send(self, system_prompt: str, messages: list[dict]) -> LLMResponse:
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise RuntimeError("simulated transient LLM failure")
+        return self._responses.pop(0)
+
+
+class AlwaysFailingLLMClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def send(self, system_prompt: str, messages: list[dict]) -> LLMResponse:
+        self.calls += 1
+        raise RuntimeError("simulated persistent LLM failure")
+
+
 @pytest.fixture
 def broken_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
@@ -167,3 +191,52 @@ def test_agent_skips_run_when_suite_already_passes(tmp_path: Path) -> None:
     assert report["success"] is True
     assert report["iterations"] == 0
     assert fake_llm.calls == 0
+
+
+def test_agent_retries_transient_llm_errors_within_an_iteration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, broken_repo: Path
+) -> None:
+    monkeypatch.setattr("agent.core.LLM_RETRY_BACKOFF_SECONDS", 0)
+    fixed_content = (
+        "def sum_first_n(n):\n    total = 0\n    for i in range(1, n + 1):\n        total += i\n    return total\n"
+    )
+    flaky_llm = FlakyLLMClient(
+        fail_times=2,  # fails twice, succeeds on the 3rd attempt (initial + 2 retries)
+        responses=[
+            tool_use_response("write_patch", {"file_path": "mathutils.py", "new_content": fixed_content}),
+            text_response("Fixed after a couple of transient errors."),
+        ],
+    )
+
+    report = run_agent(
+        source_repo_path=broken_repo,
+        run_id="unit-flaky-recovery",
+        runs_dir=tmp_path / "runs",
+        max_iterations=6,
+        llm_client=flaky_llm,
+    )
+
+    assert report["success"] is True
+    assert report["iterations"] == 1  # retries within an iteration don't advance the counter
+    assert flaky_llm.calls == 4  # 2 failures + 1 successful write_patch + 1 summary request
+
+
+def test_agent_gives_up_after_exhausting_llm_retries_reports_actual_iteration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, broken_repo: Path
+) -> None:
+    monkeypatch.setattr("agent.core.LLM_RETRY_BACKOFF_SECONDS", 0)
+    failing_llm = AlwaysFailingLLMClient()
+
+    report = run_agent(
+        source_repo_path=broken_repo,
+        run_id="unit-persistent-failure",
+        runs_dir=tmp_path / "runs",
+        max_iterations=6,
+        llm_client=failing_llm,
+    )
+
+    assert report["success"] is False
+    # gives up on the first iteration rather than mislabeling this as
+    # "exhausted all 6 iterations" - it never got past iteration 1
+    assert report["iterations"] == 1
+    assert failing_llm.calls == 3  # 1 initial attempt + 2 retries

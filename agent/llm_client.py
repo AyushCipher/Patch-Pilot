@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 
 from groq import Groq
@@ -22,6 +23,19 @@ from agent.tools import TOOL_SCHEMAS
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"
 DEFAULT_MAX_TOKENS = 4096
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 90
+
+
+class LLMRequestTimeout(Exception):
+    """Raised when a single LLM call exceeds its wall-clock budget.
+
+    This guards against the provider's own retry/backoff blocking far
+    longer than expected - observed in practice as a multi-hour stall on a
+    Groq rate-limit response, since that backoff is a plain time.sleep()
+    inside the SDK that no HTTP-level timeout bounds. Running the call in
+    a worker thread and giving up on future.result() after the deadline
+    bounds it regardless of what the SDK is doing internally.
+    """
 
 
 @dataclass
@@ -103,18 +117,39 @@ def _translate_messages(messages: list[dict], system_prompt: str) -> list[dict]:
 
 
 class LLMClient:
-    def __init__(self, api_key: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        request_timeout_seconds: int | None = None,
+    ) -> None:
+        # max_retries=2 (the SDK default) still applies on top of this - each
+        # attempt individually is bounded by request_timeout_seconds via the
+        # future.result() deadline in send(), not by this client's own
+        # per-attempt HTTP timeout, since that alone does not bound the
+        # SDK's internal retry-delay sleep.
         self.client = Groq(api_key=api_key or os.environ.get("GROQ_API_KEY"))
         self.model = model or os.environ.get("PATCHPILOT_MODEL", DEFAULT_MODEL)
+        self.request_timeout_seconds = request_timeout_seconds or int(
+            os.environ.get("LLM_REQUEST_TIMEOUT_SECONDS", DEFAULT_REQUEST_TIMEOUT_SECONDS)
+        )
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm-call")
 
     def send(self, system_prompt: str, messages: list[dict]) -> LLMResponse:
         wire_messages = _translate_messages(messages, system_prompt)
-        response = self.client.chat.completions.create(
+        future = self._executor.submit(
+            self.client.chat.completions.create,
             model=self.model,
             max_tokens=DEFAULT_MAX_TOKENS,
             messages=wire_messages,
             tools=_to_groq_tool_schemas(),
         )
+        try:
+            response = future.result(timeout=self.request_timeout_seconds)
+        except FutureTimeoutError as exc:
+            raise LLMRequestTimeout(
+                f"LLM call exceeded {self.request_timeout_seconds}s wall-clock timeout"
+            ) from exc
 
         choice = response.choices[0]
         message = choice.message

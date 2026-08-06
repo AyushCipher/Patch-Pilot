@@ -11,6 +11,12 @@ Flow:
   8. If tests still fail: feed the new failure output back as the next turn
   9. Cap at MAX_ITERATIONS. If exceeded: stop, record failure + last hypothesis
 
+Each LLM call is individually wall-clock bounded (LLMClient's own
+request_timeout_seconds) and retried up to MAX_LLM_RETRIES_PER_ITERATION
+times with a short backoff before the whole run gives up - this bounds a
+single flaky/rate-limited call to a few minutes instead of letting the
+provider's own retry-after backoff stall the run indefinitely.
+
 Every step is appended to a structured JSON trace file so the dashboard can
 render a live, step-by-step view of the agent's reasoning.
 """
@@ -28,6 +34,8 @@ from agent.sandbox import Sandbox, SandboxRunDurationExceeded, SandboxTimeoutErr
 from agent.tools import execute_tool
 
 DEFAULT_MAX_ITERATIONS = 6
+MAX_LLM_RETRIES_PER_ITERATION = 2
+LLM_RETRY_BACKOFF_SECONDS = 5
 
 SYSTEM_PROMPT = """You are PatchPilot, an autonomous code-review and bug-fixing agent.
 
@@ -134,11 +142,36 @@ def run_agent(
     for iteration in range(1, max_iterations + 1):
         trace.log("iteration_started", on_event, iteration=iteration)
 
-        try:
-            response = llm.send(SYSTEM_PROMPT, messages)
-        except Exception as exc:  # noqa: BLE001
-            trace.log("llm_error", on_event, iteration=iteration, error=str(exc))
-            break
+        response = None
+        for attempt in range(1, MAX_LLM_RETRIES_PER_ITERATION + 2):
+            try:
+                response = llm.send(SYSTEM_PROMPT, messages)
+                break
+            except Exception as exc:  # noqa: BLE001
+                trace.log(
+                    "llm_error", on_event, iteration=iteration, attempt=attempt, error=str(exc)
+                )
+                if attempt <= MAX_LLM_RETRIES_PER_ITERATION:
+                    time.sleep(LLM_RETRY_BACKOFF_SECONDS)
+
+        if response is None:
+            trace.log(
+                "run_completed",
+                on_event,
+                success=False,
+                iterations=iteration,
+                hypothesis=last_hypothesis,
+                note=f"LLM call failed after {MAX_LLM_RETRIES_PER_ITERATION + 1} attempts",
+            )
+            return _final_report(
+                run_id,
+                trace,
+                success=False,
+                iterations=iteration,
+                hypothesis=last_hypothesis,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+            )
 
         total_input_tokens += response.input_tokens
         total_output_tokens += response.output_tokens
