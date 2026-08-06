@@ -80,10 +80,14 @@ def _broadcast(run_id: str, loop: asyncio.AbstractEventLoop, event: dict) -> Non
     loop.call_soon_threadsafe(_push)
 
 
-def _execute_run(run_id: str, source_repo_path: Path, max_iterations: int) -> None:
+def _execute_run(
+    run_id: str,
+    source_repo_path: Path,
+    max_iterations: int,
+    loop: asyncio.AbstractEventLoop,
+) -> None:
     state = RUNS[run_id]
     state.status = "running"
-    loop = asyncio.get_event_loop()
 
     try:
         result = run_agent(
@@ -150,8 +154,8 @@ async def create_run(
     state = RunState(run_id=run_id, bug_id=bug_id)
     RUNS[run_id] = state
 
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(_executor, _execute_run, run_id, source_repo_path, max_iterations)
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(_executor, _execute_run, run_id, source_repo_path, max_iterations, loop)
 
     return RunSummary(run_id=run_id, bug_id=bug_id, status=state.status)
 
