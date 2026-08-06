@@ -49,12 +49,19 @@ the harness for batch scoring, the dashboard for watching one run live.
 ## Layers
 
 1. **Agent core** (`agent/`) - the ReAct-style reasoning loop
-   (`core.py`), the Groq tool-use client wrapper (`llm_client.py`), the
-   five tool implementations (`tools.py`), and the sandbox executor
-   (`sandbox.py`).
+   (`core.py`), the Groq tool-use client wrapper (`llm_client.py`), and the
+   sandbox executor (`sandbox.py`). The agent has exactly five tools
+   (`tools.py`): `read_file`, `list_files`, `search_codebase` (grep-style
+   text search), `run_tests` (runs pytest, returns pass/fail counts and
+   failing tracebacks), and `write_patch` (full-file replacement).
 2. **Eval harness** (`eval/`) - a curated bank of 18 seeded bugs across
    three difficulty tiers, plus a runner that scores the agent against all
-   of them and reports per-tier pass rates honestly.
+   of them and reports per-tier pass rates honestly. Each bug is its own
+   directory - `eval/bug_bank/bug_NNN_name/` - containing a real, runnable
+   `repo/` with a broken implementation and a genuine pytest suite that
+   fails against it, a `metadata.json` (difficulty, bug type, description),
+   and an `expected_diff.patch` reference fix (used for scoring reference
+   only, never shown to the agent).
 3. **API + dashboard** (`backend/`, `frontend/`) - a FastAPI backend
    exposing runs and eval results (including a WebSocket for live trace
    streaming), and a React dashboard for watching the agent think, browsing
@@ -94,6 +101,74 @@ This runs the backend on `:8000` and the dashboard on `:5173`. Docker
 Compose here only packages the API and frontend for deployment - it is
 unrelated to the agent's own per-run sandbox isolation (see Known
 Limitations below).
+
+## Try it
+
+With both the backend (`:8000`) and frontend (`:5173`) running:
+
+1. Open `http://localhost:5173` - lands on the **Live Run** page.
+2. Pick any entry from the bug bank dropdown (e.g. `bug_014_stale_state_snapshot`).
+3. Click **Run PatchPilot** and watch the reasoning trace stream in live over
+   the WebSocket - tool calls, test results, and the final patch, step by
+   step.
+4. Visit **Eval Leaderboard** for the full 18-bug scoreboard, or click any
+   row to see that bug's complete trace + reference diff on the
+   **Bug Detail** page.
+
+You can also drive it without the dashboard, either against a bug-bank
+entry or your own zipped repo:
+
+```bash
+# against a bug-bank entry
+curl -X POST http://localhost:8000/api/runs -F "bug_id=bug_001_off_by_one"
+
+# against your own repo (must contain a pytest suite)
+curl -X POST http://localhost:8000/api/runs -F "repo_zip=@/path/to/your-repo.zip"
+
+# both return {"run_id": "...", ...} - poll status or trace with it:
+curl http://localhost:8000/api/runs/<run_id>
+curl http://localhost:8000/api/runs/<run_id>/trace
+```
+
+## API reference
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/health` | Liveness check |
+| GET | `/api/bugs` | List all bug-bank entries (id, difficulty, type, description) |
+| POST | `/api/runs` | Start a run - form fields: `bug_id` OR `repo_zip`, optional `max_iterations` |
+| GET | `/api/runs/{run_id}` | Run status and final result (once completed) |
+| GET | `/api/runs/{run_id}/trace` | Full step-by-step JSON trace for a run |
+| WS | `/ws/runs/{run_id}` | Live trace events as they happen, then a final `connection_closed` |
+| GET | `/api/eval/report` | The latest `harness_report.json` |
+| GET | `/api/eval/report/{bug_id}` | One bug's result + full trace + reference diff |
+
+## Configuration
+
+All read from `.env` (see `.env.example`) - every one has a working default
+except `GROQ_API_KEY`.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `GROQ_API_KEY` | *(required)* | Groq API key the agent uses for every LLM call |
+| `PATCHPILOT_MODEL` | `openai/gpt-oss-120b` | Model used for the reasoning loop |
+| `MAX_ITERATIONS` | `6` | Agent turn cap before it gives up on a bug |
+| `TEST_TIMEOUT_SECONDS` | `30` | Wall-clock timeout per `pytest` invocation inside the sandbox |
+| `MAX_RUN_DURATION_SECONDS` | `300` | Total budget for sandbox file/test operations across one run |
+| `RUNS_DIR` | `runs` | Where per-run sandboxes and trace files are written |
+| `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL the frontend calls |
+
+## Testing
+
+```bash
+pytest
+```
+
+Runs the 23 tests in `tests/` (sandbox path-jail and timeout enforcement,
+agent loop iteration/success/failure logic with a mocked LLM, API endpoint
+status codes and response shapes). `pytest.ini` scopes collection to
+`tests/` only - without it, bare `pytest` would also try to collect the
+bug bank's intentionally-broken test files.
 
 ## Running the eval harness
 
@@ -226,13 +301,13 @@ itself, so a stalled network request isn't currently bounded.
 
 ```
 patchpilot/
-├── agent/            # ReAct loop, sandbox, LLM client, tool implementations
+├── agent/             # ReAct loop, sandbox, LLM client, tool implementations
 ├── eval/
 │   ├── bug_bank/      # 18 seeded bugs (7 easy, 6 medium, 5 hard)
 │   ├── run_harness.py
-│   └── results/
+│   └── results/       # harness_report.json lands here
 ├── backend/           # FastAPI app
-├── frontend/           # React + Vite + Tailwind dashboard
+├── frontend/          # React + Vite + Tailwind dashboard
 ├── tests/             # sandbox, agent loop, and API tests
 └── docker-compose.yml
 ```
