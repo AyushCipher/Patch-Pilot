@@ -108,7 +108,66 @@ calls, there is no mocked or scripted mode for this run.
 
 ## Eval results
 
-<!-- EVAL_RESULTS_TABLE -->
+Run against `openai/gpt-oss-120b` via Groq, `MAX_ITERATIONS=6`. Full data in
+[`eval/results/harness_report.json`](eval/results/harness_report.json).
+
+**Overall: 15/18 (83%)**
+
+| Tier | Passed | Pass rate |
+|---|---|---|
+| Easy | 6/7 | 86% |
+| Medium | 4/6 | 67% |
+| Hard | 5/5 | 100% |
+
+- Avg iterations to success: **4.13**
+- Avg iterations to give-up: **6** (all 3 gave-up runs hit the iteration cap)
+
+**On the 100% hard-tier pass rate:** read at face value this looks like the
+hard bugs weren't actually hard, which is exactly the failure mode this
+section is supposed to call out. Looking at the traces
+(`runs/eval_bug_01{4..8}_*/trace.json`), the model did genuinely have to
+read across 2-3 files and identify the real root cause in each case (a
+stale snapshot instead of a live reference, a cache contract violated in a
+different file than the one that crashes, a missing `invalidate()` call,
+a wrong override of a geometric formula, a missing `unsubscribe()` before
+resubscribing) - it just took more iterations to get there (avg 5.4 vs 3.3
+for easy). With only 5 hard bugs the sample is small enough that 100%
+isn't strong evidence the tier is mis-calibrated, but it's also not enough
+runs to rule that out either; a larger hard-tier bank would tell more.
+
+**On the 3 failures:** all three were **infrastructure failures, not
+reasoning failures** - every one of the three gave-up runs recorded either
+a Groq 429 rate-limit error or a raw connection error mid-run
+(`llm_error` events in the trace), not the model exhausting its ideas and
+stopping. `run_harness.py`'s failure-mode classifier does not yet
+distinguish "API call failed" from "agent ran out of hypotheses" - that's
+a known gap (see Known Limitations). Two of these three runs also show
+anomalously long wall-clock times (`bug_006`: ~5 hours, `bug_013`: ~21
+minutes) because the Groq client's retry/backoff blocked on those errors
+before finally giving up - `agent/sandbox.py`'s duration budget only
+guards sandbox operations (file I/O, test runs), not the LLM API call
+itself, so a stalled network request isn't currently bounded.
+
+| Bug | Difficulty | Outcome | Iterations |
+|---|---|---|---|
+| bug_001_off_by_one | easy | Pass | 3 |
+| bug_002_wrong_comparator | easy | Pass | 3 |
+| bug_003_swapped_arguments | easy | Pass | 3 |
+| bug_004_wrong_operator | easy | Pass | 3 |
+| bug_005_string_slice_off_by_one | easy | Pass | 3 |
+| bug_006_boolean_logic | easy | Fail (infra) | 6 |
+| bug_007_empty_list_default | easy | Pass | 3 |
+| bug_008_retry_threshold | medium | Fail (infra) | 6 |
+| bug_009_wrong_key_lookup | medium | Pass | 4 |
+| bug_010_unit_conversion_drift | medium | Pass | 4 |
+| bug_011_state_not_reset | medium | Pass | 4 |
+| bug_012_incorrect_sort_key | medium | Pass | 5 |
+| bug_013_rounding_accumulation | medium | Fail (infra) | 6 |
+| bug_014_stale_state_snapshot | hard | Pass | 6 |
+| bug_015_interface_contract_violation | hard | Pass | 6 |
+| bug_016_cache_invalidation_missing | hard | Pass | 6 |
+| bug_017_inheritance_override_bug | hard | Pass | 5 |
+| bug_018_event_bus_double_subscribe | hard | Pass | 4 |
 
 ## Tech stack
 
@@ -136,13 +195,28 @@ calls, there is no mocked or scripted mode for this run.
   file's entire contents rather than applying a diff. This is simpler and
   more reliable for a single LLM turn, at the cost of noisier diffs for
   large files. Unified-diff patching is a stretch goal.
-- **Hard-tier bugs are genuinely hard.** The eval results above are
-  reported honestly per difficulty tier rather than as one aggregate
-  number. If the agent were solving 100% of the hard tier, that would be a
-  sign the hard bugs weren't actually hard - they involve stale state
-  across modules, interface contracts violated in a different file than
-  the one that breaks, and inheritance overrides that silently violate a
-  base class invariant.
+- **Hard-tier bugs are genuinely hard, and the 100% pass rate deserves
+  scrutiny, not celebration.** See the "On the 100% hard-tier pass rate"
+  discussion above - the sample is only 5 bugs, which is too small to
+  confirm the tier is well-calibrated even though the traces show real
+  multi-file investigation happening.
+- **The LLM API call itself is not time-bounded.** `agent/sandbox.py`'s
+  duration budget only guards sandboxed operations (file I/O, test runs);
+  a stalled or rate-limited call to the LLM provider inside
+  `agent/llm_client.py` can block for as long as the provider's own
+  retry/backoff takes. This was observed directly in the eval run above -
+  two runs stalled for extended periods on Groq rate-limit/connection
+  errors before finally giving up. A request-level timeout around
+  `LLMClient.send()` is the natural fix and isn't implemented yet.
+- **The failure-mode classifier doesn't distinguish infra errors from
+  reasoning gaps.** `eval/run_harness.py::classify_failure_mode` currently
+  only checks whether the agent left behind a hypothesis. It does not
+  special-case "the LLM API call itself failed" (rate limit, connection
+  error) versus "the agent ran out of ideas" - both currently show up as
+  `gave_up_no_hypothesis`. All 3 failures in the eval run above were
+  actually the former; the trace's `llm_error` events are the reliable
+  signal for this today, but the harness doesn't surface it in the
+  aggregate stats yet.
 - **In-memory run state.** The backend keeps run status and trace queues
   in a process-local dict (`backend/main.py`), so it does not survive a
   backend restart and does not horizontally scale across multiple backend
