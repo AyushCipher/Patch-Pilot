@@ -48,8 +48,8 @@ def _to_groq_tool_schemas() -> list[dict]:
 
 
 def _translate_messages(messages: list[dict], system_prompt: str) -> list[dict]:
-    """Convert PatchPilot's internal message list (Anthropic-shaped content
-    blocks) into Groq/OpenAI-style chat messages."""
+    """Convert PatchPilot's internal message list (role + content-block
+    list, see agent/core.py) into Groq/OpenAI-style chat messages."""
     wire: list[dict] = [{"role": "system", "content": system_prompt}]
 
     for msg in messages:
