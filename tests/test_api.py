@@ -78,6 +78,7 @@ def test_eval_report_and_bug_detail_shape(monkeypatch: pytest.MonkeyPatch, tmp_p
                 "wall_clock_seconds": 2.5,
                 "input_tokens": 100,
                 "output_tokens": 50,
+                "estimated_cost_usd": 0.00004,
                 "last_hypothesis": None,
                 "summary": "Fixed it",
                 "trace_path": str(trace_path),
@@ -100,6 +101,11 @@ def test_eval_report_and_bug_detail_shape(monkeypatch: pytest.MonkeyPatch, tmp_p
             "failure_mode_breakdown": {},
             "total_input_tokens": 100,
             "total_output_tokens": 50,
+            "total_estimated_cost_usd": 0.00004,
+            "avg_cost_per_successful_fix_usd": 0.00004,
+            "avg_wall_clock_seconds": 2.5,
+            "median_wall_clock_seconds": 2.5,
+            "p90_wall_clock_seconds": None,
         },
     }
     report_path = tmp_path / "harness_report.json"

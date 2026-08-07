@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -23,6 +24,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from agent.core import run_agent  # noqa: E402
 
 DIFFICULTIES = ["easy", "medium", "hard"]
+
+# USD per 1M tokens, Groq's published list pricing as of 2026-08
+# (https://console.groq.com/docs/model/openai/gpt-oss-120b). Update this if
+# the configured model or Groq's rates change - these are list prices for
+# cost estimation, not pulled from a live billing API.
+PRICING_PER_MILLION_TOKENS_USD = {
+    "openai/gpt-oss-120b": {"input": 0.15, "output": 0.60},
+}
+
+
+def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float | None:
+    rates = PRICING_PER_MILLION_TOKENS_USD.get(model)
+    if rates is None:
+        return None
+    return (input_tokens / 1_000_000) * rates["input"] + (output_tokens / 1_000_000) * rates["output"]
 
 
 def discover_bugs(bug_bank_dir: Path) -> list[dict]:
@@ -76,6 +92,9 @@ def run_single_bug(bug: dict, runs_dir: Path, max_iterations: int) -> dict:
         }
         error = f"{type(exc).__name__}: {exc}"
     wall_clock = time.monotonic() - started
+    input_tokens = report.get("input_tokens", 0)
+    output_tokens = report.get("output_tokens", 0)
+    model = os.environ.get("PATCHPILOT_MODEL", "openai/gpt-oss-120b")
 
     result = {
         "bug_id": bug["bug_id"],
@@ -84,8 +103,9 @@ def run_single_bug(bug: dict, runs_dir: Path, max_iterations: int) -> dict:
         "success": report["success"],
         "iterations": report["iterations"],
         "wall_clock_seconds": round(wall_clock, 2),
-        "input_tokens": report.get("input_tokens", 0),
-        "output_tokens": report.get("output_tokens", 0),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "estimated_cost_usd": estimate_cost_usd(model, input_tokens, output_tokens),
         "last_hypothesis": report.get("last_hypothesis"),
         "summary": report.get("summary"),
         "trace_path": str(runs_dir / run_id / "trace.json"),
@@ -117,6 +137,19 @@ def aggregate(results: list[dict]) -> dict:
         mode = r["failure_mode"] or "unknown"
         failure_modes[mode] = failure_modes.get(mode, 0) + 1
 
+    # Latency (wall-clock) is only meaningful for runs that actually
+    # exercised the model to convergence or gave up cleanly - a run that hit
+    # the retry-and-give-up path is mostly measuring provider flakiness, not
+    # agent behavior, so it's excluded from the latency stats below (it's
+    # still counted in pass/fail and cost).
+    reasoning_results = [
+        r for r in results if r["failure_mode"] != "gave_up_no_hypothesis" or r["success"]
+    ]
+    latencies = [r["wall_clock_seconds"] for r in reasoning_results]
+
+    costs = [r["estimated_cost_usd"] for r in results if r["estimated_cost_usd"] is not None]
+    success_costs = [r["estimated_cost_usd"] for r in successes if r["estimated_cost_usd"] is not None]
+
     return {
         "total_bugs": len(results),
         "total_passed": len(successes),
@@ -134,6 +167,15 @@ def aggregate(results: list[dict]) -> dict:
         "failure_mode_breakdown": failure_modes,
         "total_input_tokens": sum(r["input_tokens"] for r in results),
         "total_output_tokens": sum(r["output_tokens"] for r in results),
+        "total_estimated_cost_usd": round(sum(costs), 4) if costs else None,
+        "avg_cost_per_successful_fix_usd": (
+            round(statistics.mean(success_costs), 4) if success_costs else None
+        ),
+        "avg_wall_clock_seconds": round(statistics.mean(latencies), 2) if latencies else None,
+        "median_wall_clock_seconds": round(statistics.median(latencies), 2) if latencies else None,
+        "p90_wall_clock_seconds": (
+            round(statistics.quantiles(latencies, n=10)[8], 2) if len(latencies) >= 2 else None
+        ),
     }
 
 
@@ -177,6 +219,12 @@ def main() -> None:
         if stats["total"] == 0:
             continue
         print(f"  {tier}: {stats['passed']}/{stats['total']} ({stats['pass_rate']:.0%})")
+    if agg["total_estimated_cost_usd"] is not None:
+        print(f"Estimated cost: ${agg['total_estimated_cost_usd']:.4f} total, "
+              f"${agg['avg_cost_per_successful_fix_usd']:.4f} avg per successful fix")
+    if agg["avg_wall_clock_seconds"] is not None:
+        print(f"Latency: avg {agg['avg_wall_clock_seconds']}s, median {agg['median_wall_clock_seconds']}s, "
+              f"p90 {agg['p90_wall_clock_seconds']}s")
     print(f"Report written to {out_path}")
 
 
