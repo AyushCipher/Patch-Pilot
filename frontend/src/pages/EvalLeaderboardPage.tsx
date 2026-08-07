@@ -7,6 +7,7 @@ import { StatCard } from "../components/ui/StatCard";
 import { Badge, difficultyTone } from "../components/ui/Badge";
 import { getEvalReport } from "../api/client";
 import type { Difficulty, HarnessReport } from "../types";
+import { formatPct, formatSeconds, formatTier, formatUsd } from "../utils/format";
 
 type SortKey = "bug_id" | "difficulty" | "iterations" | "wall_clock_seconds";
 type FilterDifficulty = Difficulty | "all";
@@ -96,6 +97,23 @@ export function EvalLeaderboardPage() {
         />
       </div>
 
+      <div className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <StatCard
+          label="Estimated cost"
+          value={formatUsd(agg.total_estimated_cost_usd)}
+          hint={`${formatUsd(agg.avg_cost_per_successful_fix_usd)} avg per successful fix`}
+        />
+        <StatCard
+          label="Latency (avg / median)"
+          value={`${formatSeconds(agg.avg_wall_clock_seconds)} / ${formatSeconds(agg.median_wall_clock_seconds)}`}
+          hint={`p90: ${formatSeconds(agg.p90_wall_clock_seconds)}`}
+        />
+        <StatCard
+          label="Tokens (in / out)"
+          value={`${agg.total_input_tokens.toLocaleString()} / ${agg.total_output_tokens.toLocaleString()}`}
+        />
+      </div>
+
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <select
           value={difficultyFilter}
@@ -176,11 +194,3 @@ export function EvalLeaderboardPage() {
   );
 }
 
-function formatPct(value: number | null): string {
-  return value === null ? "-" : `${Math.round(value * 100)}%`;
-}
-
-function formatTier(stats: { passed: number; total: number; pass_rate: number | null }): string {
-  if (stats.total === 0) return "-";
-  return `${stats.passed}/${stats.total}`;
-}

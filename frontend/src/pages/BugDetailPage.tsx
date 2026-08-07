@@ -8,6 +8,7 @@ import { DiffViewer } from "../components/ui/DiffViewer";
 import { Badge, difficultyTone } from "../components/ui/Badge";
 import { getBugDetail } from "../api/client";
 import type { BugDetailResponse } from "../types";
+import { formatUsd } from "../utils/format";
 
 export function BugDetailPage() {
   const { bugId } = useParams<{ bugId: string }>();
@@ -57,6 +58,12 @@ export function BugDetailPage() {
                     {detail.result.input_tokens}/{detail.result.output_tokens}
                   </dd>
                 </div>
+                {detail.result.estimated_cost_usd != null && (
+                  <div className="flex justify-between">
+                    <dt>Est. cost</dt>
+                    <dd>{formatUsd(detail.result.estimated_cost_usd)}</dd>
+                  </div>
+                )}
                 {detail.result.failure_mode && (
                   <div className="flex justify-between">
                     <dt>Failure mode</dt>

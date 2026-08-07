@@ -47,6 +47,7 @@ export interface EvalResult {
   wall_clock_seconds: number;
   input_tokens: number;
   output_tokens: number;
+  estimated_cost_usd: number | null;
   last_hypothesis: string | null;
   summary: string | null;
   trace_path: string;
@@ -71,6 +72,11 @@ export interface EvalAggregate {
   failure_mode_breakdown: Record<string, number>;
   total_input_tokens: number;
   total_output_tokens: number;
+  total_estimated_cost_usd: number | null;
+  avg_cost_per_successful_fix_usd: number | null;
+  avg_wall_clock_seconds: number | null;
+  median_wall_clock_seconds: number | null;
+  p90_wall_clock_seconds: number | null;
 }
 
 export interface HarnessReport {
