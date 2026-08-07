@@ -1,5 +1,7 @@
 # PatchPilot
 
+[![CI](https://github.com/AyushCipher/Patch-Pilot/actions/workflows/ci.yml/badge.svg)](https://github.com/AyushCipher/Patch-Pilot/actions/workflows/ci.yml)
+
 PatchPilot is an autonomous code-review and bug-fixing agent. Point it at a
 Python repository with a failing pytest suite, and it investigates the
 codebase, forms a hypothesis, writes a patch, re-runs the tests, and
@@ -155,20 +157,30 @@ except `GROQ_API_KEY`.
 | `MAX_ITERATIONS` | `6` | Agent turn cap before it gives up on a bug |
 | `TEST_TIMEOUT_SECONDS` | `30` | Wall-clock timeout per `pytest` invocation inside the sandbox |
 | `MAX_RUN_DURATION_SECONDS` | `300` | Total budget for sandbox file/test operations across one run |
+| `LLM_REQUEST_TIMEOUT_SECONDS` | `90` | Hard wall-clock cap on a single LLM call; retried up to twice with a 5s backoff before the run gives up |
 | `RUNS_DIR` | `runs` | Where per-run sandboxes and trace files are written |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL the frontend calls |
 
 ## Testing
 
 ```bash
-pytest
+pytest                          # backend: 25 tests
+cd frontend && npm test         # frontend: 9 tests (vitest)
 ```
 
-Runs the 23 tests in `tests/` (sandbox path-jail and timeout enforcement,
-agent loop iteration/success/failure logic with a mocked LLM, API endpoint
-status codes and response shapes). `pytest.ini` scopes collection to
-`tests/` only - without it, bare `pytest` would also try to collect the
-bug bank's intentionally-broken test files.
+Backend tests cover sandbox path-jail and timeout enforcement, agent loop
+iteration/success/failure/retry logic with a mocked LLM (including the
+LLM-call-retry-then-give-up path), and API endpoint status codes and
+response shapes. `pytest.ini` scopes collection to `tests/` only - without
+it, bare `pytest` would also try to collect the bug bank's
+intentionally-broken test files.
+
+Frontend tests cover the report-formatting helpers in `frontend/src/utils/format.ts`
+- added after a real bug: a page rendering an older `harness_report.json`
+(missing fields the newer harness adds) crashed with `Cannot read
+properties of undefined (reading 'toFixed')`, caught only by actually
+running the app in a browser, not by the type checker. Both CI jobs
+(`.github/workflows/ci.yml`) run these on every push.
 
 ## Running the eval harness
 
@@ -185,64 +197,82 @@ calls, there is no mocked or scripted mode for this run.
 
 Run against `openai/gpt-oss-120b` via Groq, `MAX_ITERATIONS=6`. Full data in
 [`eval/results/harness_report.json`](eval/results/harness_report.json).
+This is the run *after* the LLM-call-timeout fix described below - an
+earlier run (still in git history) scored 15/18 with 3 failures, two of
+which were multi-hour infrastructure stalls. This run's numbers are the
+ones to trust.
 
-**Overall: 15/18 (83%)**
+**Overall: 17/18 (94%)**
 
 | Tier | Passed | Pass rate |
 |---|---|---|
-| Easy | 6/7 | 86% |
-| Medium | 4/6 | 67% |
+| Easy | 7/7 | 100% |
+| Medium | 5/6 | 83% |
 | Hard | 5/5 | 100% |
 
-- Avg iterations to success: **4.13**
-- Avg iterations to give-up: **6** (all 3 gave-up runs hit the iteration cap)
+- Avg iterations to success: computed per-run in the report; typically 3-6
+- Estimated cost: **$0.0201 total, $0.0011 avg per successful fix** (Groq
+  list pricing: $0.15/M input tokens, $0.60/M output tokens for
+  `openai/gpt-oss-120b`, see Known Limitations for what this estimate does
+  and doesn't cover)
+- Latency: **avg 48.5s, median 40.3s, p90 74.0s** per bug (excludes runs
+  that gave up purely due to a bounded LLM-call failure with zero
+  reasoning progress - see `aggregate()` in `run_harness.py`)
 
-**On the 100% hard-tier pass rate:** read at face value this looks like the
-hard bugs weren't actually hard, which is exactly the failure mode this
-section is supposed to call out. Looking at the traces
-(`runs/eval_bug_01{4..8}_*/trace.json`), the model did genuinely have to
-read across 2-3 files and identify the real root cause in each case (a
-stale snapshot instead of a live reference, a cache contract violated in a
-different file than the one that crashes, a missing `invalidate()` call,
-a wrong override of a geometric formula, a missing `unsubscribe()` before
-resubscribing) - it just took more iterations to get there (avg 5.4 vs 3.3
-for easy). With only 5 hard bugs the sample is small enough that 100%
-isn't strong evidence the tier is mis-calibrated, but it's also not enough
-runs to rule that out either; a larger hard-tier bank would tell more.
+**On the timeout fix actually working:** the two bugs that previously
+stalled for hours on Groq rate-limit/connection errors (`bug_006`: ~5
+hours, `bug_013`: ~21 minutes) now complete in 27.8s and 35.7s respectively
+in this run. That's the direct, measured effect of bounding
+`LLMClient.send()` to a hard per-call timeout with a small retry budget
+instead of letting the SDK's own retry-after backoff run unbounded - see
+`agent/llm_client.py::LLMRequestTimeout` and `agent/core.py`'s
+`MAX_LLM_RETRIES_PER_ITERATION`.
 
-**On the 3 failures:** all three were **infrastructure failures, not
-reasoning failures** - every one of the three gave-up runs recorded either
-a Groq 429 rate-limit error or a raw connection error mid-run
-(`llm_error` events in the trace), not the model exhausting its ideas and
-stopping. `run_harness.py`'s failure-mode classifier does not yet
-distinguish "API call failed" from "agent ran out of hypotheses" - that's
-a known gap (see Known Limitations). Two of these three runs also show
-anomalously long wall-clock times (`bug_006`: ~5 hours, `bug_013`: ~21
-minutes) because the Groq client's retry/backoff blocked on those errors
-before finally giving up - `agent/sandbox.py`'s duration budget only
-guards sandbox operations (file I/O, test runs), not the LLM API call
-itself, so a stalled network request isn't currently bounded.
+**On the one remaining failure (`bug_008_retry_threshold`):** this time
+it's a genuine reasoning failure, not infrastructure - the trace
+(`runs/eval_bug_008_retry_threshold/trace.json`) shows no `llm_error`
+events at all. The model investigated correctly, wrote a semantically
+correct fix on iteration 5, but the generated file had a stray trailing
+`}` character (a plausible LLM-tool-call artifact, not present in Python
+syntax), which raised a `SyntaxError` on test collection. The auto-run
+after `write_patch` caught this immediately and reported it back to the
+model, but the model spent its 6th and final iteration re-running
+`run_tests` to re-confirm the same failure instead of rereading and fixing
+its own patch, then ran out of budget. This is exactly the kind of
+"plausible-looking patch that wasn't actually verified correctly" failure
+mode the harness is designed to surface - a real reasoning gap, not
+noise.
 
-| Bug | Difficulty | Outcome | Iterations |
-|---|---|---|---|
-| bug_001_off_by_one | easy | Pass | 3 |
-| bug_002_wrong_comparator | easy | Pass | 3 |
-| bug_003_swapped_arguments | easy | Pass | 3 |
-| bug_004_wrong_operator | easy | Pass | 3 |
-| bug_005_string_slice_off_by_one | easy | Pass | 3 |
-| bug_006_boolean_logic | easy | Fail (infra) | 6 |
-| bug_007_empty_list_default | easy | Pass | 3 |
-| bug_008_retry_threshold | medium | Fail (infra) | 6 |
-| bug_009_wrong_key_lookup | medium | Pass | 4 |
-| bug_010_unit_conversion_drift | medium | Pass | 4 |
-| bug_011_state_not_reset | medium | Pass | 4 |
-| bug_012_incorrect_sort_key | medium | Pass | 5 |
-| bug_013_rounding_accumulation | medium | Fail (infra) | 6 |
-| bug_014_stale_state_snapshot | hard | Pass | 6 |
-| bug_015_interface_contract_violation | hard | Pass | 6 |
-| bug_016_cache_invalidation_missing | hard | Pass | 6 |
-| bug_017_inheritance_override_bug | hard | Pass | 5 |
-| bug_018_event_bus_double_subscribe | hard | Pass | 4 |
+**On the 100% hard-tier pass rate (both runs):** still worth scrutiny, not
+celebration - see Known Limitations. Looking at the hard-tier traces, the
+model did genuinely have to read across 2-3 files and identify the real
+root cause in each case (a stale snapshot instead of a live reference, a
+cache contract violated in a different file than the one that crashes, a
+missing `invalidate()` call, a wrong override of a geometric formula, a
+missing `unsubscribe()` before resubscribing) - it just took more
+iterations to get there. With only 5 hard bugs the sample is too small to
+either confirm or rule out that the tier is mis-calibrated.
+
+| Bug | Difficulty | Outcome | Iterations | Time (s) | Est. cost |
+|---|---|---|---|---|---|
+| bug_001_off_by_one | easy | Pass | 3 | 33.2 | $0.0007 |
+| bug_002_wrong_comparator | easy | Pass | 3 | 23.1 | $0.0005 |
+| bug_003_swapped_arguments | easy | Pass | 4 | 71.3 | $0.0011 |
+| bug_004_wrong_operator | easy | Pass | 3 | 72.1 | $0.0007 |
+| bug_005_string_slice_off_by_one | easy | Pass | 3 | 37.4 | $0.0008 |
+| bug_006_boolean_logic | easy | Pass | 3 | 27.8 | $0.0006 |
+| bug_007_empty_list_default | easy | Pass | 3 | 25.2 | $0.0005 |
+| bug_008_retry_threshold | medium | Fail (reasoning) | 6 | 52.3 | $0.0014 |
+| bug_009_wrong_key_lookup | medium | Pass | 5 | 40.0 | $0.0012 |
+| bug_010_unit_conversion_drift | medium | Pass | 6 | 81.5 | $0.0018 |
+| bug_011_state_not_reset | medium | Pass | 5 | 40.3 | $0.0011 |
+| bug_012_incorrect_sort_key | medium | Pass | 5 | 33.6 | $0.0011 |
+| bug_013_rounding_accumulation | medium | Pass | 4 | 35.7 | $0.0009 |
+| bug_014_stale_state_snapshot | hard | Pass | 6 | 59.6 | $0.0015 |
+| bug_015_interface_contract_violation | hard | Pass | 6 | 61.2 | $0.0016 |
+| bug_016_cache_invalidation_missing | hard | Pass | 6 | 68.0 | $0.0016 |
+| bug_017_inheritance_override_bug | hard | Pass | 5 | 57.1 | $0.0016 |
+| bug_018_event_bus_double_subscribe | hard | Pass | 5 | 57.7 | $0.0013 |
 
 ## Tech stack
 
@@ -275,23 +305,33 @@ itself, so a stalled network request isn't currently bounded.
   discussion above - the sample is only 5 bugs, which is too small to
   confirm the tier is well-calibrated even though the traces show real
   multi-file investigation happening.
-- **The LLM API call itself is not time-bounded.** `agent/sandbox.py`'s
-  duration budget only guards sandboxed operations (file I/O, test runs);
-  a stalled or rate-limited call to the LLM provider inside
-  `agent/llm_client.py` can block for as long as the provider's own
-  retry/backoff takes. This was observed directly in the eval run above -
-  two runs stalled for extended periods on Groq rate-limit/connection
-  errors before finally giving up. A request-level timeout around
-  `LLMClient.send()` is the natural fix and isn't implemented yet.
+- **~~The LLM API call itself is not time-bounded~~ - fixed.** Originally,
+  `agent/sandbox.py`'s duration budget only guarded sandboxed operations
+  (file I/O, test runs); a stalled or rate-limited call to the LLM
+  provider could block for as long as the provider's own retry/backoff
+  took - observed directly as multi-hour stalls in an earlier eval run
+  (still in git history). `agent/llm_client.py::LLMClient.send()` now runs
+  the API call in a worker thread with a hard `LLM_REQUEST_TIMEOUT_SECONDS`
+  deadline (default 90s) via `future.result(timeout=...)`, and
+  `agent/core.py` retries a failed call up to `MAX_LLM_RETRIES_PER_ITERATION`
+  times before giving up on the run. The eval results above are the
+  re-run after this fix, and the two previously-stalled bugs now complete
+  in under a minute each.
 - **The failure-mode classifier doesn't distinguish infra errors from
-  reasoning gaps.** `eval/run_harness.py::classify_failure_mode` currently
-  only checks whether the agent left behind a hypothesis. It does not
-  special-case "the LLM API call itself failed" (rate limit, connection
-  error) versus "the agent ran out of ideas" - both currently show up as
-  `gave_up_no_hypothesis`. All 3 failures in the eval run above were
-  actually the former; the trace's `llm_error` events are the reliable
-  signal for this today, but the harness doesn't surface it in the
-  aggregate stats yet.
+  reasoning gaps in its aggregate stats.** `eval/run_harness.py::classify_failure_mode`
+  only checks whether the agent left behind a hypothesis - it doesn't
+  special-case "the LLM call failed/timed out" versus "the agent
+  investigated and gave up." Both show up as `gave_up_no_hypothesis` in
+  `failure_mode_breakdown`. The trace's `llm_error` events (now with an
+  `attempt` field) are the reliable per-run signal for this today, but the
+  harness doesn't roll it up automatically.
+- **Cost estimates are static list pricing, not billing data.** `eval/run_harness.py::PRICING_PER_MILLION_TOKENS_USD`
+  is a hardcoded rate table (Groq's published $0.15/M input, $0.60/M
+  output for `openai/gpt-oss-120b` as of 2026-08) multiplied against
+  reported token counts - it is not pulled from a billing API and will
+  silently go stale if Groq changes rates or a different model is
+  configured without updating the table (unknown models fall back to a
+  `null` cost rather than a wrong number, at least).
 - **In-memory run state.** The backend keeps run status and trace queues
   in a process-local dict (`backend/main.py`), so it does not survive a
   backend restart and does not horizontally scale across multiple backend
