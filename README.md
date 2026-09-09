@@ -52,10 +52,12 @@ the harness for batch scoring, the dashboard for watching one run live.
 
 1. **Agent core** (`agent/`) - the ReAct-style reasoning loop
    (`core.py`), the Groq tool-use client wrapper (`llm_client.py`), and the
-   sandbox executor (`sandbox.py`). The agent has exactly five tools
+   sandbox executor (`sandbox.py`). The agent has six tools
    (`tools.py`): `read_file`, `list_files`, `search_codebase` (grep-style
    text search), `run_tests` (runs pytest, returns pass/fail counts and
-   failing tracebacks), and `write_patch` (full-file replacement).
+   failing tracebacks), `write_patch` (full-file replacement with AST
+   syntax pre-validation), and `apply_diff` (token-efficient unified diff
+   and search-and-replace hunk patching).
 2. **Eval harness** (`eval/`) - a curated bank of 18 seeded bugs across
    three difficulty tiers, plus a runner that scores the agent against all
    of them and reports per-tier pass rates honestly. Each bug is its own
@@ -138,8 +140,9 @@ curl http://localhost:8000/api/runs/<run_id>/trace
 |---|---|---|
 | GET | `/health` | Liveness check |
 | GET | `/api/bugs` | List all bug-bank entries (id, difficulty, type, description) |
+| GET | `/api/runs` | List historical runs from persistent SQLite storage |
 | POST | `/api/runs` | Start a run - form fields: `bug_id` OR `repo_zip`, optional `max_iterations` |
-| GET | `/api/runs/{run_id}` | Run status and final result (once completed) |
+| GET | `/api/runs/{run_id}` | Run status and final result (persisted across restarts) |
 | GET | `/api/runs/{run_id}/trace` | Full step-by-step JSON trace for a run |
 | WS | `/ws/runs/{run_id}` | Live trace events as they happen, then a final `connection_closed` |
 | GET | `/api/eval/report` | The latest `harness_report.json` |
@@ -158,13 +161,14 @@ except `GROQ_API_KEY`.
 | `TEST_TIMEOUT_SECONDS` | `30` | Wall-clock timeout per `pytest` invocation inside the sandbox |
 | `MAX_RUN_DURATION_SECONDS` | `300` | Total budget for sandbox file/test operations across one run |
 | `LLM_REQUEST_TIMEOUT_SECONDS` | `90` | Hard wall-clock cap on a single LLM call; retried up to twice with a 5s backoff before the run gives up |
-| `RUNS_DIR` | `runs` | Where per-run sandboxes and trace files are written |
+| `RUNS_DIR` | `runs` | Where per-run sandboxes, SQLite DB, and trace files are written |
+| `RUNS_DB_PATH` | `runs/runs.db` | SQLite database file for persistent run state |
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL the frontend calls |
 
 ## Testing
 
 ```bash
-pytest                          # backend: 25 tests
+pytest                          # backend: 31 tests
 cd frontend && npm test         # frontend: 9 tests (vitest)
 ```
 
@@ -279,8 +283,8 @@ either confirm or rule out that the tier is mis-calibrated.
 | Layer | Technology |
 |---|---|
 | Agent reasoning | Groq Python SDK (`groq`), Chat Completions API tool use, `openai/gpt-oss-120b` |
-| Sandbox execution | Python `subprocess`, directory-jailed filesystem checks |
-| Backend | FastAPI, Uvicorn, WebSockets |
+| Sandbox execution | Python `subprocess`, directory-jailed filesystem checks, AST syntax pre-validation |
+| Backend & Persistence | FastAPI, Uvicorn, WebSockets, SQLite (`backend/db.py`) |
 | Eval harness | Plain Python, pytest as the scoring oracle |
 | Frontend | React 18, TypeScript, Vite, Tailwind CSS, React Router |
 | Packaging | Docker, Docker Compose |
@@ -296,10 +300,11 @@ either confirm or rule out that the tier is mis-calibrated.
   per test run, but test code still executes as a subprocess on the host
   Python, not inside Docker-in-Docker. Full container-per-run isolation is
   a documented stretch goal for v2.
-- **Whole-file patches, not unified diffs.** `write_patch` replaces a
-  file's entire contents rather than applying a diff. This is simpler and
-  more reliable for a single LLM turn, at the cost of noisier diffs for
-  large files. Unified-diff patching is a stretch goal.
+- **Diff patching & AST pre-validation.** The agent supports both full-file
+  replacement (`write_patch`) and targeted unified diff / search-and-replace
+  patching (`apply_diff`). All proposed Python changes are parsed with `ast.parse`
+  prior to saving/testing so that syntax errors are caught immediately without
+  wasting test execution turns.
 - **Hard-tier bugs are genuinely hard, and the 100% pass rate deserves
   scrutiny, not celebration.** See the "On the 100% hard-tier pass rate"
   discussion above - the sample is only 5 bugs, which is too small to
@@ -332,10 +337,10 @@ either confirm or rule out that the tier is mis-calibrated.
   silently go stale if Groq changes rates or a different model is
   configured without updating the table (unknown models fall back to a
   `null` cost rather than a wrong number, at least).
-- **In-memory run state.** The backend keeps run status and trace queues
-  in a process-local dict (`backend/main.py`), so it does not survive a
-  backend restart and does not horizontally scale across multiple backend
-  processes. Fine for a single-instance demo, not for production.
+- **Persistent SQLite run state.** Run state, execution status, results, and
+  event traces are backed by SQLite (`backend/db.py` -> `runs/runs.db`),
+  persisting across backend process restarts. Active streaming connections use
+  in-memory async queues while the run is live.
 
 ## Project structure
 

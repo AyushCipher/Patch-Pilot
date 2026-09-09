@@ -26,6 +26,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from agent.core import run_agent  # noqa: E402
+from backend.db import Database  # noqa: E402
 
 load_dotenv()
 
@@ -33,6 +34,7 @@ BUG_BANK_DIR = Path(__file__).resolve().parent.parent / "eval" / "bug_bank"
 RESULTS_PATH = Path(__file__).resolve().parent.parent / "eval" / "results" / "harness_report.json"
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", "runs"))
 MAX_ITERATIONS = int(os.environ.get("MAX_ITERATIONS", "6"))
+DB_PATH = Path(os.environ.get("RUNS_DB_PATH", RUNS_DIR / "runs.db"))
 
 app = FastAPI(title="PatchPilot API")
 
@@ -45,6 +47,7 @@ app.add_middleware(
 )
 
 _executor = ThreadPoolExecutor(max_workers=4)
+db = Database(db_path=DB_PATH)
 
 
 class RunState:
@@ -68,6 +71,7 @@ class RunSummary(BaseModel):
 
 
 def _broadcast(run_id: str, loop: asyncio.AbstractEventLoop, event: dict) -> None:
+    db.add_event(run_id, event)
     state = RUNS.get(run_id)
     if state is None:
         return
@@ -88,6 +92,7 @@ def _execute_run(
 ) -> None:
     state = RUNS[run_id]
     state.status = "running"
+    db.update_run_status(run_id=run_id, status="running")
 
     try:
         result = run_agent(
@@ -99,9 +104,11 @@ def _execute_run(
         )
         state.result = result
         state.status = "completed"
+        db.update_run_status(run_id=run_id, status="completed", result=result)
     except Exception as exc:  # noqa: BLE001
         state.error = f"{type(exc).__name__}: {exc}"
         state.status = "failed"
+        db.update_run_status(run_id=run_id, status="failed", error=state.error)
     finally:
         _broadcast(run_id, loop, {"type": "connection_closed"})
 
@@ -153,6 +160,7 @@ async def create_run(
 
     state = RunState(run_id=run_id, bug_id=bug_id)
     RUNS[run_id] = state
+    db.create_run(run_id=run_id, bug_id=bug_id, status=state.status)
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(_executor, _execute_run, run_id, source_repo_path, max_iterations, loop)
@@ -160,26 +168,42 @@ async def create_run(
     return RunSummary(run_id=run_id, bug_id=bug_id, status=state.status)
 
 
+@app.get("/api/runs")
+async def list_runs() -> list[dict]:
+    return db.list_runs()
+
+
 @app.get("/api/runs/{run_id}")
 async def get_run(run_id: str) -> dict:
     state = RUNS.get(run_id)
-    if state is None:
+    if state is not None:
+        return {
+            "run_id": state.run_id,
+            "bug_id": state.bug_id,
+            "status": state.status,
+            "result": state.result,
+            "error": state.error,
+        }
+
+    # Fallback to persistent SQLite storage
+    persisted_run = db.get_run(run_id)
+    if persisted_run is None:
         raise HTTPException(status_code=404, detail="unknown run_id")
-    return {
-        "run_id": state.run_id,
-        "bug_id": state.bug_id,
-        "status": state.status,
-        "result": state.result,
-        "error": state.error,
-    }
+    return persisted_run
 
 
 @app.get("/api/runs/{run_id}/trace")
 async def get_run_trace(run_id: str) -> list:
     trace_path = RUNS_DIR / run_id / "trace.json"
-    if not trace_path.exists():
-        raise HTTPException(status_code=404, detail="no trace found for this run_id")
-    return json.loads(trace_path.read_text(encoding="utf-8"))
+    if trace_path.exists():
+        return json.loads(trace_path.read_text(encoding="utf-8"))
+
+    # Fallback to SQLite event store
+    events = db.get_events(run_id)
+    if events:
+        return events
+
+    raise HTTPException(status_code=404, detail="no trace found for this run_id")
 
 
 @app.websocket("/ws/runs/{run_id}")

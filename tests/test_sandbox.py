@@ -110,3 +110,70 @@ def test_operations_rejected_once_run_duration_exceeded(sandbox: Sandbox) -> Non
     time.sleep(0.01)
     with pytest.raises(SandboxRunDurationExceeded):
         sandbox.read_file("app.py")
+
+
+def test_write_patch_rejects_invalid_python_syntax(sandbox: Sandbox) -> None:
+    from agent.tools import execute_tool
+
+    original_code = sandbox.read_file("app.py")
+    result = execute_tool(
+        sandbox,
+        "write_patch",
+        {"file_path": "app.py", "new_content": "def add(a, b):\n    return a + b}\n"},  # stray }
+    )
+    assert "error" in result
+    assert "SyntaxError in app.py" in result["error"]
+    # Verify file content was not overwritten
+    assert sandbox.read_file("app.py") == original_code
+
+
+def test_apply_diff_search_and_replace_block(sandbox: Sandbox) -> None:
+    from agent.tools import execute_tool
+
+    result = execute_tool(
+        sandbox,
+        "apply_diff",
+        {
+            "file_path": "app.py",
+            "search_block": "return a + b",
+            "replace_block": "return (a + b) * 1",
+        },
+    )
+    assert result.get("status") == "diff_applied"
+    assert "return (a + b) * 1" in sandbox.read_file("app.py")
+
+
+def test_apply_diff_unified_diff(sandbox: Sandbox) -> None:
+    from agent.tools import execute_tool
+
+    diff_text = """@@ -1,2 +1,2 @@
+ def add(a, b):
+-    return a + b
++    return a + b + 10
+"""
+    result = execute_tool(
+        sandbox,
+        "apply_diff",
+        {"file_path": "app.py", "diff": diff_text},
+    )
+    assert result.get("status") == "diff_applied"
+    assert "+ 10" in sandbox.read_file("app.py")
+
+
+def test_apply_diff_rejects_syntax_error(sandbox: Sandbox) -> None:
+    from agent.tools import execute_tool
+
+    original_code = sandbox.read_file("app.py")
+    result = execute_tool(
+        sandbox,
+        "apply_diff",
+        {
+            "file_path": "app.py",
+            "search_block": "return a + b",
+            "replace_block": "return a + b ::: syntax error",
+        },
+    )
+    assert "error" in result
+    assert "SyntaxError in app.py" in result["error"]
+    assert sandbox.read_file("app.py") == original_code
+

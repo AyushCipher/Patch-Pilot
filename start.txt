@@ -1,0 +1,37 @@
+Starting it
+Fastest — Docker (what you just confirmed works):
+
+
+export GROQ_API_KEY=gsk_your-key-here     # PowerShell: $env:GROQ_API_KEY="gsk_..."
+docker compose up --build
+Backend on :8000, dashboard on :5173. Open http://localhost:5173.
+
+Dev mode instead (if you want hot-reload while presenting, e.g. to tweak something live):
+
+
+# terminal 1
+pip install -r requirements.txt
+cp .env.example .env    # fill in GROQ_API_KEY
+uvicorn backend.main:app --reload --port 8000
+
+# terminal 2
+cd frontend && npm install && npm run dev
+Showcase script (~5 minutes, ordered for maximum impact)
+1. Live Run page (the flagship demo) — pick a medium or hard bug (e.g. bug_014_stale_state_snapshot), not an easy one — the reasoning is more interesting to watch. Click Run PatchPilot and let the trace stream in live over the WebSocket: tool calls, file reads, the failing test output, the patch, the re-run. This is the "agent visibly thinking" moment — let it play out on screen rather than narrating over it.
+
+2. Eval Leaderboard — this is where you differentiate from a typical agent demo. Point at:
+
+The per-tier breakdown (86%/83%/100%), not one aggregate number
+The cost/latency stat cards — most people don't think to report this
+Click into bug_008_retry_threshold (the one failure) and show the trace — it's a genuine, honest failure (a stray } the model didn't catch), not a hidden one
+3. Talk through the README's "Eval results" section if it's a technical conversation — specifically the paragraph on the 100% hard-tier pass rate deserving scrutiny, and the timeout-fix story (5-hour stall → 28s, with the before/after numbers). That section is the strongest evidence of engineering judgment in the whole project; it's worth pulling up on screen, not just mentioning.
+
+4. If they want to go deeper on code, the three files worth having open:
+
+agent/core.py — the ReAct loop and the retry/timeout logic
+agent/sandbox.py — the path-jail enforcement (_resolve) and timeout handling
+agent/llm_client.py — LLMRequestTimeout and the thread-based hard deadline
+5. Close with the repo itself — CI badge at the top of the README, actually green on GitHub. Costs nothing to mention and signals you don't just say "tests pass," you show it.
+
+Skip the bug-bank internals and Docker setup unless asked — they're supporting infrastructure, not the story.
+

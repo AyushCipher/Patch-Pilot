@@ -240,3 +240,32 @@ def test_agent_gives_up_after_exhausting_llm_retries_reports_actual_iteration(
     # "exhausted all 6 iterations" - it never got past iteration 1
     assert report["iterations"] == 1
     assert failing_llm.calls == 3  # 1 initial attempt + 2 retries
+
+
+def test_agent_succeeds_using_apply_diff(tmp_path: Path, broken_repo: Path) -> None:
+    fake_llm = FakeLLMClient(
+        [
+            tool_use_response(
+                "apply_diff",
+                {
+                    "file_path": "mathutils.py",
+                    "search_block": "range(1, n)",
+                    "replace_block": "range(1, n + 1)",
+                },
+            ),
+            text_response("Applied targeted diff fix to range end-point."),
+        ]
+    )
+
+    report = run_agent(
+        source_repo_path=broken_repo,
+        run_id="unit-apply-diff-success",
+        runs_dir=tmp_path / "runs",
+        max_iterations=6,
+        llm_client=fake_llm,
+    )
+
+    assert report["success"] is True
+    assert report["iterations"] == 1
+    assert report["summary"] == "Applied targeted diff fix to range end-point."
+

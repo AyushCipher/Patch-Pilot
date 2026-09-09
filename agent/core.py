@@ -43,9 +43,10 @@ You are given a Python repository with a failing pytest suite. Your job is to:
 1. Investigate using read_file, list_files, and search_codebase to understand
    the code and form a hypothesis about why the tests are failing.
 2. Call run_tests whenever you want to verify current behavior.
-3. Once you understand the bug, call write_patch with the COMPLETE new
-   contents of the file you are fixing (not a diff, not a snippet - the
-   full file). You may patch more than one file across multiple turns.
+3. Once you understand the bug, you can apply fixes in one of two ways:
+   - Call write_patch with the COMPLETE new contents of the file you are fixing.
+   - Call apply_diff with search_block + replace_block (or a unified diff) for targeted edits in larger files.
+   Python syntax is automatically validated before saving. You may patch more than one file across multiple turns.
 4. After a patch is applied, tests will automatically be re-run and you will
    see the result in the next turn.
 5. Keep iterating until the tests pass. You have a limited number of turns,
@@ -221,7 +222,7 @@ def run_agent(
 
             trace.log("tool_result", on_event, iteration=iteration, tool=block["name"], result=result)
 
-            if block["name"] == "write_patch" and "error" not in result:
+            if block["name"] in ("write_patch", "apply_diff") and "error" not in result:
                 patch_written_this_turn = True
 
             tool_results.append(

@@ -125,3 +125,40 @@ def test_eval_report_and_bug_detail_shape(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     missing_response = client.get("/api/eval/report/bug_does_not_exist")
     assert missing_response.status_code == 404
+
+
+def test_sqlite_persistence_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.db import Database
+    db_file = tmp_path / "test_runs.db"
+    test_db = Database(db_file)
+    monkeypatch.setattr(backend_main, "db", test_db)
+
+    # Insert a run directly into SQLite
+    test_db.create_run("persisted-run-123", "bug_001_off_by_one", "completed")
+    test_db.update_run_status("persisted-run-123", "completed", result={"success": True, "iterations": 2})
+    test_db.add_event("persisted-run-123", {"type": "run_started", "timestamp": 100.0})
+
+    # Ensure in-memory RUNS doesn't have it
+    backend_main.RUNS.pop("persisted-run-123", None)
+
+    # Query API
+    response = client.get("/api/runs/persisted-run-123")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["run_id"] == "persisted-run-123"
+    assert data["status"] == "completed"
+    assert data["result"]["success"] is True
+
+    # Query Trace API fallback
+    trace_response = client.get("/api/runs/persisted-run-123/trace")
+    assert trace_response.status_code == 200
+    trace = trace_response.json()
+    assert len(trace) == 1
+    assert trace[0]["type"] == "run_started"
+
+    # Query List Runs API
+    list_response = client.get("/api/runs")
+    assert list_response.status_code == 200
+    runs = list_response.json()
+    assert any(r["run_id"] == "persisted-run-123" for r in runs)
+
