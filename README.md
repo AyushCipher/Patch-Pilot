@@ -25,9 +25,17 @@ orchestration or supervisor/specialist architecture here by design.
                                   ▼
 ┌───────────────┐        ┌───────────────────┐        ┌───────────────────┐
 │ FastAPI + WS  │◄──────►│   Agent Core       │◄──────►│  Groq API          │
-│ (backend/)    │  runs  │   (agent/core.py)  │  tools  │  (chat completions,│
-│               │        │   ReAct loop       │  used   │   tool use)        │
+│ (backend/)    │  runs  │   (agent/core.py)  │  calls │  (chat completions,│
+│               │        │   ReAct loop       │  model │   tool use)        │
 └───────┬───────┘        └─────────┬─────────┘        └───────────────────┘
+        │                          │
+        │                 MCP      │ Tool Client
+        │               Protocol   │ (agent/mcp_client.py)
+        │                          ▼
+        │                ┌───────────────────┐
+        │                │  FastMCP Server   │
+        │                │(agent/mcp_server) │
+        │                └─────────┬─────────┘
         │                          │
         │                          ▼
         │                ┌───────────────────┐
@@ -48,15 +56,31 @@ The agent core is the only thing that talks to the LLM. The eval harness and
 the API/dashboard are two different ways of driving the same agent core -
 the harness for batch scoring, the dashboard for watching one run live.
 
+Tool execution is decoupled via the **Model Context Protocol (MCP)**:
+the ReAct agent uses `agent/mcp_client.py` to dispatch tool calls to a `FastMCP`
+server (`agent/mcp_server.py`), which safely invokes the sandbox operations and
+returns structured responses over the protocol.
+
+## FastMCP Tool-Server Architecture
+
+PatchPilot uses [FastMCP](https://gofastmcp.com) (`fastmcp`) to standardize tool invocation:
+
+1. **Decoupled Tool Protocol**: All agent capabilities (`validate_syntax`, `read_file`, `list_files`, `search_codebase`, `run_tests`, `write_patch`, `apply_diff`) are registered as `@mcp.tool()` endpoints on a FastMCP server instance.
+2. **Local Dev (Stdio Transport)**: For standalone local inspection, the MCP server can run directly over standard I/O:
+   ```bash
+   python -m agent.mcp_server
+   ```
+3. **Production Multi-Tenant (HTTP/SSE Transport)**: In distributed or multi-tenant production setups, the FastMCP server can be hosted independently over SSE (`mcp.run(transport="sse")`), allowing agent instances to connect to remote containerized sandboxes across network boundaries without local subprocess coupling.
+
 ## Layers
 
-1. **Agent core** (`agent/`) - the ReAct-style reasoning loop
-   (`core.py`), the Groq tool-use client wrapper (`llm_client.py`), and the
-   sandbox executor (`sandbox.py`). The agent has six tools
-   (`tools.py`): `read_file`, `list_files`, `search_codebase` (grep-style
-   text search), `run_tests` (runs pytest, returns pass/fail counts and
-   failing tracebacks), `write_patch` (full-file replacement with AST
-   syntax pre-validation), and `apply_diff` (token-efficient unified diff
+1. **Agent core & MCP tool layer** (`agent/`) - the ReAct-style reasoning loop
+   (`core.py`), the Groq tool-use client wrapper (`llm_client.py`), the FastMCP
+   server (`mcp_server.py`), the MCP client adapter (`mcp_client.py`), and the
+   sandbox executor (`sandbox.py`). The agent has six tools: `read_file`,
+   `list_files`, `search_codebase` (grep-style text search), `run_tests` (runs pytest,
+   returns pass/fail counts and failing tracebacks), `write_patch` (full-file replacement
+   with AST syntax pre-validation), and `apply_diff` (token-efficient unified diff
    and search-and-replace hunk patching).
 2. **Eval harness** (`eval/`) - a curated bank of 18 seeded bugs across
    three difficulty tiers, plus a runner that scores the agent against all
@@ -68,8 +92,9 @@ the harness for batch scoring, the dashboard for watching one run live.
    only, never shown to the agent).
 3. **API + dashboard** (`backend/`, `frontend/`) - a FastAPI backend
    exposing runs and eval results (including a WebSocket for live trace
-   streaming), and a React dashboard for watching the agent think, browsing
-   the eval leaderboard, and inspecting any bug's full trace + diff.
+   streaming), SQLite run persistence (`backend/db.py`), and a React dashboard
+   for watching the agent think, browsing the eval leaderboard, and inspecting any
+   bug's full trace + diff.
 
 ## Setup
 
@@ -168,7 +193,7 @@ except `GROQ_API_KEY`.
 ## Testing
 
 ```bash
-pytest                          # backend: 31 tests
+pytest                          # backend: 34 tests (includes FastMCP parity tests)
 cd frontend && npm test         # frontend: 9 tests (vitest)
 ```
 

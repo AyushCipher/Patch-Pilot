@@ -30,8 +30,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent.llm_client import LLMClient
+from agent.mcp_client import MCPToolClient
 from agent.sandbox import Sandbox, SandboxRunDurationExceeded, SandboxTimeoutError
-from agent.tools import execute_tool
 
 DEFAULT_MAX_ITERATIONS = 6
 MAX_LLM_RETRIES_PER_ITERATION = 2
@@ -87,6 +87,7 @@ def run_agent(
     max_run_duration_seconds: int = 300,
     on_event: EventCallback | None = None,
     llm_client: LLMClient | None = None,
+    mcp_client: MCPToolClient | None = None,
 ) -> dict:
     run_id = run_id or uuid.uuid4().hex[:12]
     trace = Trace(Path(runs_dir) / run_id / "trace.json")
@@ -102,6 +103,7 @@ def run_agent(
     )
     sandbox.setup_from_dir(source_repo_path)
     trace.log("sandbox_ready", on_event, sandbox_root=str(sandbox.root))
+    mcp = mcp_client or MCPToolClient(sandbox)
 
     try:
         initial_result = sandbox.run_tests()
@@ -212,7 +214,7 @@ def run_agent(
                 input=block["input"],
             )
             try:
-                result = execute_tool(sandbox, block["name"], block["input"])
+                result = mcp.call_tool(block["name"], block["input"])
             except SandboxRunDurationExceeded as exc:
                 trace.log("run_failed", on_event, reason=str(exc))
                 return _final_report(
